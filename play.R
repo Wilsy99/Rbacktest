@@ -39,28 +39,30 @@ daily_data <- tidyquant::tq_get(
   to = Sys.Date()
 )
 
-trades <- daily_data |> 
-  transform_to_weekly() |> 
-  add_ema(price_col = "close", n = 10) |> 
-  add_ema(price_col = "close", n = 20) |> 
+trades <- daily_data |>
+  transform_to_weekly() |>
+  add_ema(price_col = "close", n = 10) |>
+  add_ema(price_col = "close", n = 20) |>
   dplyr::mutate(
     signal = dplyr::case_when(
       (ema_10 > ema_20) & (dplyr::lag(ema_10) < dplyr::lag(ema_20)) ~ 1,
       (ema_10 < ema_20) & (dplyr::lag(ema_10) > dplyr::lag(ema_20)) ~ -1,
       .default = 0
-    )
-  ) |> 
-  dplyr::filter(signal != 0) |> 
+    ),
+    # FIX: Trade at next week's open (shift forward by 1 period)
+    next_open = dplyr::lead(open)
+  ) |>
+  # Remove last row if it has a signal (can't trade next week if data ends)
+  dplyr::filter(signal != 0, !is.na(next_open)) |>
   dplyr::slice(-c(
-    if (dplyr::first(signal) == -1) 1 else integer(0),
-    if (dplyr::last(signal) == 1) dplyr::n() else integer(0)
-  )) |> 
-  dplyr::mutate(trade_id = cumsum(signal == 1)) |> 
+    if (dplyr::first(signal) == -1) 1 else integer(0)
+  )) |>
+  dplyr::mutate(trade_id = cumsum(signal == 1)) |>
   dplyr::summarise(
     buy_date = dplyr::first(week_end),
     sell_date = dplyr::last(week_end),
-    buy_price = dplyr::first(close),
-    sell_price = dplyr::last(close),
+    buy_price = dplyr::first(next_open),   # Use next week's open
+    sell_price = dplyr::last(next_open),   # Use next week's open
     return = sell_price / buy_price - 1,
     .by = trade_id
   )
