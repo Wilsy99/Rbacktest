@@ -1,29 +1,68 @@
-# current use case
+transform_to_weekly <- function(data, week_start = 1) {
+  data |> 
+    dplyr::arrange(date) |> 
+    dplyr::mutate(
+      adjustment_factor = adjusted / close,
+      week_start = lubridate::floor_date(date, unit = "weeks", week_start = 1),
+    ) |> 
+    dplyr::summarise(
+      week_end = dplyr::last(date),
+      open = dplyr::first(open * adjustment_factor),
+      high = max(high * adjustment_factor),
+      low = min(low * adjustment_factor),
+      close = dplyr::last(adjusted),
+      volume = sum(volume),
+      .by = week_start
+    )
+}
+  
+add_ema <- function(data, price_col, n) {
+  ema_col_name <- paste0("ema_", n)
 
-weekly_data <- get_weekly_data(
-  symbol = "SPY", 
-  from = "1900-01-01"
+  ema <- 
+    data |> 
+    dplyr::pull({{price_col}}) |> 
+    TTR::EMA(n)
+
+  data |> 
+    dplyr::mutate(
+      {{ema_col_name}} := ema
+    )
+}
+
+sum_ignore_na <- purrr::partial(.f = sum, na.rm = TRUE)
+
+daily_data <- tidyquant::tq_get(
+  x = "SPY",
+  get = "stock.prices",
+  from = "2010-01-01",
+  to = Sys.Date()
 )
 
-weekly_signals <-
-  weekly_data |> 
-  add_ema(n = 10, price_col = "adjusted") |> 
-  add_ema(n = 20, price_col = "adjusted") |> 
-  generate_crossover_signals(fast_ema = "ema_10", slow_ema = "ema_20")
+trades <- daily_data |> 
+  transform_to_weekly() |> 
+  add_ema(price_col = "close", n = 10) |> 
+  add_ema(price_col = "close", n = 20) |> 
+  dplyr::mutate(
+    signal = dplyr::case_when(
+      (ema_10 > ema_20) & (dplyr::lag(ema_10) < dplyr::lag(ema_20)) ~ 1,
+      (ema_10 < ema_20) & (dplyr::lag(ema_10) > dplyr::lag(ema_20)) ~ -1,
+      .default = 0
+    )
+  ) |> 
+  dplyr::filter(signal != 0) |> 
+  dplyr::slice(-c(
+    if (dplyr::first(signal) == -1) 1 else integer(0),
+    if (dplyr::last(signal) == 1) dplyr::n() else integer(0)
+  )) |> 
+  dplyr::mutate(trade_id = cumsum(signal == 1)) |> 
+  dplyr::summarise(
+    buy_date = dplyr::first(week_end),
+    sell_date = dplyr::last(week_end),
+    buy_price = dplyr::first(close),
+    sell_price = dplyr::last(close),
+    return = sell_price / buy_price - 1,
+    .by = trade_id
+  )
 
- result <- 
-  weekly_signals |>
-  calculate_returns() |> 
-  calculate_benchmark_returns() |> 
-  calculate_strategy_returns()
-
-metrics <- compute_performance_metrics(
-  result$net_return,
-  periods_per_year = 52,
-  n_trials = 1,
-  rf_annual = 0.04
-)
-
-print_validation_summary(metrics, "SPY EMA 10/20")
-
-summarize_returns(result)
+prod(1 + trades$return) - 1
