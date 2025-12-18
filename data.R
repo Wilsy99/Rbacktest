@@ -1,84 +1,73 @@
-# R/data.R
-# Functions for fetching and preparing financial data
-
-#' Get weekly SPY data from Yahoo Finance
-#'
-#' @param symbol Character. Ticker symbol (default: "SPY")
-#' @param from Character. Start date in "YYYY-MM-DD" format
-#' @param to Character. End date in "YYYY-MM-DD" format
-#' 
-#' @return A tsibble with weekly OHLCV data
-#' 
-#' @details
-#' This function:
-#' 1. Fetches daily data from Yahoo Finance via tidyquant
-#' 2. Converts to weekly frequency (Friday close)
-#' 3. Returns a tsibble (time-aware tibble) for downstream analysis
-#' 
-#' @examples
-#' spy_data <- get_weekly_data(from = "2010-01-01", to = "2023-12-31")
-get_weekly_data <- function(symbol = "SPY",
-                            from = "2010-01-01",
-                            to = Sys.Date()) {
-  
-  daily_data <- tidyquant::tq_get(
-    x = symbol,
-    get = "stock.prices",
-    from = from,
-    to = to
-  )
-  
-  weekly_data <- daily_data |>
-    dplyr::mutate(
-      week = lubridate::floor_date(date, unit = "week", week_start = 1)
+get_daily_data <- function(
+  ticker,
+  from = "1900-01-01",
+  to = Sys.Date(),
+  add_returns = TRUE
+) {
+  data <-
+    tq_get(
+      x = ticker,
+      get = "stock.prices",
+      from = from,
+      to = to
     ) |>
-    dplyr::group_by(symbol, week) |>
-    dplyr::slice_tail(n = 1) |>  
-    dplyr::ungroup() |>
-    dplyr::select(
-      date,
-      open,
-      high,
-      low,
-      close,
-      volume,
-      adjusted
-    )
-  
-  weekly_tsibble <- weekly_data |>
-    tsibble::as_tsibble(index = date)
-  
-  return(weekly_tsibble)
+    arrange(date) |>
+    mutate(
+      adjustment_factor = adjusted / close,
+      open = open * adjustment_factor,
+      high = high * adjustment_factor,
+      low = low * adjustment_factor,
+      close = close * adjustment_factor,
+    ) |>
+    select(-c(adjusted, adjustment_factor))
+
+  if (!add_returns) {
+    return(data)
+  }
+
+  data |>
+    calculate_returns()
 }
 
-
-#' Validate data quality
-#'
-#' @param data A tsibble or tibble with OHLCV data
-#' 
-#' @return Tibble with data quality metrics
-#' 
-#' @details
-#' Checks for:
-#' - Missing values
-#' - Duplicate dates
-#' - Gaps in time series
-#' - Negative prices (data errors)
-validate_data <- function(data) {
-  tibble::tibble(
-    check = c(
-      "Total observations",
-      "Missing close prices",
-      "Duplicate dates",
-      "Negative prices",
-      "Date range"
-    ),
-    result = c(
-      nrow(data),
-      sum(is.na(data$close)),
-      anyDuplicated(data$date) > 0,
-      any(data$close < 0, na.rm = TRUE),
-      paste(min(data$date), "to", max(data$date))
+get_weekly_data <- function(
+  ticker,
+  week_start = 1,
+  from = "1900-01-01",
+  to = Sys.Date(),
+  add_returns = TRUE
+) {
+  data <-
+    get_daily_data(
+      ticker = ticker,
+      from = from,
+      to = to,
+      add_returns = FALSE
+    ) |>
+    mutate(
+      week_start = floor_date(date, unit = "weeks", week_start = week_start)
+    ) |>
+    summarise(
+      week_end = last(date),
+      open = first(open),
+      high = max(high),
+      low = min(low),
+      close = last(close),
+      volume = sum(volume),
+      .by = week_start
     )
-  )
+
+  if (!add_returns) {
+    return(data)
+  }
+
+  data |>
+    calculate_returns()
+}
+
+calculate_returns <- function(data, close_col = "close") {
+  close_col <- ensym(close_col)
+  data |>
+    mutate(
+      return = !!close_col / lag(!!close_col) - 1
+    )
 }
