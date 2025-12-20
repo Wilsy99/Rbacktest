@@ -4,7 +4,16 @@ library(TTR)
 library(tidyquant)
 library(purrr)
 
+source("data.R")
+source("strategy.R")
+source("returns.R")
+
 spy_data <- get_weekly_data("SPY")
+
+spy_data |>
+  generate_splits(n_groups = 10, n_test_groups = 2) |>
+  purge_training_sets(max_trade_periods = 10, embargo_pct = 0.035)
+
 
 ema_cross_strategy <-
   spy_data |>

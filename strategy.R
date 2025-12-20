@@ -29,28 +29,28 @@ add_emas <- function(data, price_col = "close", ns) {
   bind_cols(data, emas)
 }
 
-identify_trades <- function(data) {
-  data |>
-    mutate(
-      signal = if_else(
-        week_end = last(week_end) & position = 1,
-        signal = -1,
-        signal
-      )
-    ) |>
-    filter(
-      signal != 0
-    ) |>
-    filter(
-      !(row_number() == 1 & signal == -1),
-    ) |>
-    mutate(trade_id = cumsum(signal == 1)) |>
-    summarise(
-      buy_date = first(week_end),
-      sell_date = last(week_end),
-      buy_price = first(close),
-      sell_price = last(close),
-      return = sell_price / buy_price - 1,
-      .by = trade_id
-    )
-}
+# identify_trades <- function(data) {
+#   data |>
+#     mutate(
+#       signal = if_else(
+#         week_end = last(week_end) & position = 1,
+#         signal = -1,
+#         signal
+#       )
+#     ) |>
+#     filter(
+#       signal != 0
+#     ) |>
+#     filter(
+#       !(row_number() == 1 & signal == -1),
+#     ) |>
+#     mutate(trade_id = cumsum(signal == 1)) |>
+#     summarise(
+#       buy_date = first(week_end),
+#       sell_date = last(week_end),
+#       buy_price = first(close),
+#       sell_price = last(close),
+#       return = sell_price / buy_price - 1,
+#       .by = trade_id
+#     )
+# }
