@@ -1,8 +1,9 @@
-library(dplyr)
+library(collapse)
+library(tibble)
+library(purrr)
 library(lubridate)
 library(TTR)
 library(tidyquant)
-library(purrr)
 
 source("data.R")
 source("strategy.R")

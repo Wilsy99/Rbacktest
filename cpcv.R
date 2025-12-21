@@ -1,22 +1,90 @@
-generate_splits <- function(data, n_groups, n_test_groups) {
+generate_test_set <- function(
+  data,
+  test_groups
+) {
+  data |>
+    fsubset(group_id %in% test_groups)
+}
+
+generate_purged_training_set <- function(
+  data,
+  test_groups,
+  training_groups,
+  max_trade_periods,
+  embargo_pct
+) {
+  embargo <- ceiling(nrow(data) * embargo_pct)
+
+  purge_start_groups <- training_groups[training_groups %in% (test_groups + 1)]
+  purge_end_groups <- training_groups[training_groups %in% (test_groups - 1)]
+
+  data |>
+    fsubset(
+      group_id %in% training_groups,
+    )
+}
+
+generate_test_set_factory <- function(
+  data,
+  test_groups
+) {
+  partial(
+    generate_test_set,
+    data = data,
+    test_groups = test_groups,
+  )
+}
+
+generate_purged_training_set_factory <- function(
+  data,
+  test_groups,
+  training_groups,
+  max_trade_periods,
+  embargo_pct
+) {
+  partial(
+    generate_purged_training_set,
+    data = data,
+    test_groups = test_groups,
+    training_groups = training_groups,
+    max_trade_periods = max_trade_periods,
+    embargo_pct = embargo_pct
+  )
+}
+
+generate_splits <- function(
+  data,
+  n_groups,
+  n_test_groups,
+  max_trade_periods,
+  embargo_pct
+) {
   data_with_groups <-
     data |>
-    mutate(group_id = ntile(n = n_groups))
+    fmutate(group_id = ntile(n = n_groups))
 
   tibble(
+    split_id = 1:choose(n_groups, n_test_groups),
     test_groups = combn(n_groups, n_test_groups, simplify = FALSE),
     training_groups = map(test_groups, \(test_group) {
       setdiff(1:n_groups, test_group)
     }),
-    split_id = seq_along(test_groups),
-    training_set = map(training_groups, \(tg) {
-      filter(data_with_groups, group_id %in% tg)
+    generate_test_set_fn = map2(data_with_groups, test_groups, \(df, tg) {
+      generate_test_set_factory(df, tg)
     }),
-    test_set = map(test_groups, \(tg) {
-      filter(data_with_groups, group_id %in% tg)
-    })
-  ) |>
-    relocate(split_id)
+    generate_purged_training_set_fn = pmap(
+      list(
+        data_with_groups,
+        test_groups,
+        training_groups,
+        max_trade_periods,
+        embargo_pct
+      ),
+      \(df, tg, trg, mtp, epct) {
+        generate_purged_training_set_factory(df, tg, mtp, epct)
+      }
+    )
+  )
 }
 
 purge_training_set <- function(
