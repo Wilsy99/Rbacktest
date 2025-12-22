@@ -2,7 +2,7 @@ get_daily_data <- function(
   ticker,
   from = "1900-01-01",
   to = Sys.Date(),
-  add_returns = TRUE
+  calculate_returns = TRUE
 ) {
   data <-
     tq_get(
@@ -11,22 +11,26 @@ get_daily_data <- function(
       from = from,
       to = to
     ) |>
-    arrange(date) |>
-    mutate(
-      adjustment_factor = adjusted / close,
-      open = open * adjustment_factor,
-      high = high * adjustment_factor,
-      low = low * adjustment_factor,
-      close = close * adjustment_factor,
-    ) |>
-    select(-c(adjusted, adjustment_factor))
+    roworder(date)
 
-  if (!add_returns) {
-    return(data)
+  adj_factor <- data$adjusted / data$close
+
+  adjusted_data <-
+    data |>
+    ftransform(
+      open = open * adj_factor,
+      high = high * adj_factor,
+      low = low * adj_factor,
+      close = adjusted
+    ) |>
+    fselect(-adjusted)
+
+  if (!calculate_returns) {
+    return(adjusted_data)
   }
 
-  data |>
-    calculate_returns()
+  adjusted_data |>
+    fmutate(return = fgrowth(close, 1, scale = 1))
 }
 
 get_weekly_data <- function(
@@ -34,40 +38,32 @@ get_weekly_data <- function(
   week_start = 1,
   from = "1900-01-01",
   to = Sys.Date(),
-  add_returns = TRUE
+  calculate_returns = TRUE
 ) {
   data <-
     get_daily_data(
       ticker = ticker,
       from = from,
       to = to,
-      add_returns = FALSE
+      calculate_returns = FALSE
     ) |>
-    mutate(
+    fmutate(
       week_start = floor_date(date, unit = "weeks", week_start = week_start)
     ) |>
-    summarise(
-      week_end = last(date),
-      open = first(open),
-      high = max(high),
-      low = min(low),
-      close = last(close),
-      volume = sum(volume),
-      .by = week_start
+    fgroup_by(week_start) |>
+    fsummarise(
+      week_end = flast(date),
+      open = ffirst(open),
+      high = fmax(high),
+      low = fmin(low),
+      close = flast(close),
+      volume = fsum(volume)
     )
 
-  if (!add_returns) {
+  if (!calculate_returns) {
     return(data)
   }
 
   data |>
-    calculate_returns()
-}
-
-calculate_returns <- function(data, close_col = "close") {
-  close_col <- ensym(close_col)
-  data |>
-    mutate(
-      return = !!close_col / lag(!!close_col) - 1
-    )
+    fmutate(return = fgrowth(close, 1, scale = 1))
 }
